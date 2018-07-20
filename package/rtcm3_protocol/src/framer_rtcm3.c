@@ -20,8 +20,10 @@
 #define RTCM3_PREAMBLE 0xD3
 #define RTCM3_HEADER_LENGTH 3
 #define RTCM3_FOOTER_LENGTH 3
-#define RTCM3_FRAME_SIZE_MAX 1029
-#define RTCM3_BUFFER_SIZE (2*RTCM3_FRAME_SIZE_MAX)
+#define RTCM3_MESSAGE_LENGTH_MAX 1023
+#define RTCM3_FRAME_SIZE_MAX \
+  (RTCM3_HEADER_LENGTH + RTCM3_MESSAGE_LENGTH_MAX + RTCM3_FOOTER_LENGTH)
+#define RTCM3_BUFFER_SIZE (RTCM3_FRAME_SIZE_MAX)
 
 typedef struct {
   uint8_t buffer[RTCM3_BUFFER_SIZE];
@@ -30,6 +32,7 @@ typedef struct {
   uint32_t remove_count;
 } framer_rtcm3_state_t;
 
+/* clang-format off */
 static const uint32_t crc24qtab[256] = {
   0x000000, 0x864CFB, 0x8AD50D, 0x0C99F6, 0x93E6E1, 0x15AA1A, 0x1933EC, 0x9F7F17,
   0xA18139, 0x27CDC2, 0x2B5434, 0xAD18CF, 0x3267D8, 0xB42B23, 0xB8B2D5, 0x3EFE2E,
@@ -64,17 +67,20 @@ static const uint32_t crc24qtab[256] = {
   0xE37B16, 0x6537ED, 0x69AE1B, 0xEFE2E0, 0x709DF7, 0xF6D10C, 0xFA48FA, 0x7C0401,
   0x42FA2F, 0xC4B6D4, 0xC82F22, 0x4E63D9, 0xD11CCE, 0x575035, 0x5BC9C3, 0xDD8538
 };
+/* clang-format on */
 
 static uint32_t crc24q(const uint8_t *buf, uint32_t len, uint32_t crc)
 {
-  for (uint32_t i = 0; i < len; i++)
+  for (uint32_t i = 0; i < len; i++) {
     crc = ((crc << 8) & 0xFFFFFF) ^ crc24qtab[((crc >> 16) ^ buf[i]) & 0xff];
+  }
   return crc;
 }
 
-void * framer_create(void)
+void *framer_create(void)
 {
   framer_rtcm3_state_t *s = (framer_rtcm3_state_t *)malloc(sizeof(*s));
+  piksi_log(LOG_INFO, "RTCM allocating %u bytes for framer\n", sizeof(*s));
   if (s == NULL) {
     return NULL;
   }
@@ -89,65 +95,98 @@ void * framer_create(void)
 void framer_destroy(void **state)
 {
   free(*state);
+  piksi_log(LOG_INFO, "RTCM destroy framer\n");
   *state = NULL;
 }
 
-uint32_t framer_process(void *state, const uint8_t *data, uint32_t data_length,
-                        const uint8_t **frame, uint32_t *frame_length)
+/* Remove at least `remove_count` bytes from the beginning of the buffer,
+ * until preamble is found or buffer is emptied */
+static void trim_buffer_beginning(framer_rtcm3_state_t *s)
+{
+
+  assert(s->remove_count <= s->buffer_length);
+
+  /* Search for the first valid preamble after the removed bytes */
+  uint32_t offset = s->remove_count;
+  while (offset < s->buffer_length) {
+    if (s->buffer[offset] == RTCM3_PREAMBLE) {
+      break;
+    }
+    offset++;
+  }
+  /* Shift the remaning data down to the start of the buffer */
+  if (offset < s->buffer_length) {
+    memmove(&s->buffer[0], &s->buffer[offset], s->buffer_length - offset);
+    s->buffer_length -= offset;
+  } else {
+    s->buffer_length = 0;
+  }
+  s->remove_count = 0;
+}
+
+/* Read `refill_count` bytes from data and add to the end of the buffer */
+static uint32_t refill_buffer(framer_rtcm3_state_t *s,
+                              const uint8_t *data,
+                              const uint32_t data_length,
+                              uint32_t data_offset)
+{
+
+  assert(s->buffer_length < RTCM3_FRAME_SIZE_MAX);
+  assert(s->refill_count < RTCM3_FRAME_SIZE_MAX);
+  assert(s->buffer_length + s->refill_count <= RTCM3_FRAME_SIZE_MAX);
+
+  uint32_t count = s->refill_count;
+  uint32_t available = data_length - data_offset;
+
+  if (count > available) {
+    /* requested number of bytes not available to be read, so read what
+     * there is and return */
+    count = available;
+  }
+
+  /* read bytes to the end of the buffer */
+  memcpy(&s->buffer[s->buffer_length], &data[data_offset], count);
+  s->buffer_length += count;
+  data_offset += count;
+  s->refill_count -= count;
+  return data_offset;
+}
+
+uint32_t framer_process(void *state,
+                        const uint8_t *data,
+                        uint32_t data_length,
+                        const uint8_t **frame,
+                        uint32_t *frame_length)
 {
   framer_rtcm3_state_t *s = (framer_rtcm3_state_t *)state;
 
   uint32_t data_offset = 0;
   while (1) {
 
-    /* Remove from the front of the buffer if requested */
+    /* Either removal or refill requested but not both */
+    assert(s->refill_count == 0 || s->remove_count == 0);
+
     if (s->remove_count != 0) {
+      /* Remove extra bytes from the front of the buffer if requested */
+      trim_buffer_beginning(s);
 
-      /* Search for the first valid preamble after the removed bytes */
-      uint32_t offset = s->remove_count;
-      while (offset < s->buffer_length) {
-        if (s->buffer[offset] == RTCM3_PREAMBLE) {
-          break;
-        }
-        offset++;
-      }
-
-      /* Shift the remaning data down to the start of the buffer */
-      if (offset < s->buffer_length) {
-        memmove(&s->buffer[0], &s->buffer[offset], s->buffer_length - offset);
-        s->buffer_length -= offset;
-      } else {
-        s->buffer_length = 0;
-      }
-
-      /* Note: remove count should never be greater than the buffer length */
-      s->remove_count = 0;
+      /* after removal, buffer either starts with preamble or is empty */
+      assert(s->buffer[0] == RTCM3_PREAMBLE || s->buffer_length == 0);
     }
 
-    /* Refill the buffer if requested */
     if (s->refill_count != 0) {
+      /* Read more data to the end of the buffer */
+      data_offset = refill_buffer(s, data, data_length, data_offset);
 
-      uint32_t count = s->refill_count;
-      uint32_t available = data_length - data_offset;
-      if (count > available) {
-        count = available;
-      }
-      if (count > RTCM3_BUFFER_SIZE - s->buffer_length) {
-        piksi_log(LOG_INFO, "RTCM buffer full\n");
-        count = RTCM3_BUFFER_SIZE - s->buffer_length;
-      }
-      memcpy(&s->buffer[s->buffer_length], &data[data_offset], count);
-      s->buffer_length += count;
-      data_offset += count;
-      s->refill_count -= count;
-
-      /* Return if there is still not enough data available */
+      /* Return if there was not enough data available */
       if (s->refill_count != 0) {
         *frame = NULL;
         *frame_length = 0;
         return data_offset;
       }
     }
+
+    assert(s->refill_count == 0 && s->remove_count == 0);
 
     /* Wait for header */
     if (s->buffer_length < RTCM3_HEADER_LENGTH) {
@@ -163,8 +202,9 @@ uint32_t framer_process(void *state, const uint8_t *data, uint32_t data_length,
 
     /* Get message length */
     uint32_t message_length = ((s->buffer[1] & 0x3) << 8) | s->buffer[2];
-    uint32_t total_length = RTCM3_HEADER_LENGTH + message_length +
-                            RTCM3_FOOTER_LENGTH;
+    assert(message_length <= RTCM3_MESSAGE_LENGTH_MAX);
+    uint32_t total_length =
+      RTCM3_HEADER_LENGTH + message_length + RTCM3_FOOTER_LENGTH;
 
     /* Wait for full frame */
     if (s->buffer_length < total_length) {
@@ -173,18 +213,25 @@ uint32_t framer_process(void *state, const uint8_t *data, uint32_t data_length,
     }
 
     /* Verify CRC */
-    uint32_t computed_crc = crc24q(s->buffer,
-                                   total_length - RTCM3_FOOTER_LENGTH, 0);
-    uint32_t frame_crc = (s->buffer[total_length - 3] << 16) |
-                         (s->buffer[total_length - 2] <<  8) |
-                         (s->buffer[total_length - 1] <<  0);
+    uint32_t computed_crc =
+      crc24q(s->buffer, total_length - RTCM3_FOOTER_LENGTH, 0);
+    uint32_t frame_crc = (s->buffer[total_length - 3] << 16)
+                         | (s->buffer[total_length - 2] << 8)
+                         | (s->buffer[total_length - 1] << 0);
     if (frame_crc != computed_crc) {
       s->remove_count = 1;
-      piksi_log(LOG_INFO, "RTCM CRC error, buffer length %u\n", total_length);
+      uint16_t message_type = (s->buffer[3] << 4) | ((s->buffer[4] >> 4) & 0xf);
+
+      piksi_log(LOG_INFO,
+                "RTCM CRC error decoding msg_num %u len %u (data offset %u, buffer length %u)\n",
+                message_type,
+                total_length,
+                data_offset, s->buffer_length);
       continue;
     }
 
-    /* Decoded frame */
+    /* There is enough data in the buffer and CRC passes, so this frame can be
+     * passed on to the decoder */
     s->remove_count = total_length;
     *frame = s->buffer;
     *frame_length = total_length;
