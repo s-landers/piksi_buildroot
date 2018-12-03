@@ -24,7 +24,7 @@ stderr_log="/var/log/$name.err"
 _setup_svdir()
 {
   if [[ -e "/var/service/${name}" ]]; then
-    return
+    rm -rf /var/service/${name}
   fi
 
   mkdir -p "/etc/sv/${name}/control"
