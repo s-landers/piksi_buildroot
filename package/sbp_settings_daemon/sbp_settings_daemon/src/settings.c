@@ -191,7 +191,7 @@ static void settings_read_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
     piksi_log(LOG_WARNING, "Invalid sender");
     return;
   }
-  
+
   /* Expect to find at least section and name */
   const char *section = NULL, *name = NULL;
   if (settings_parse(msg, len, &section, &name, NULL, NULL) < SETTINGS_TOKENS_NAME) {
@@ -201,10 +201,7 @@ static void settings_read_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
 
   struct setting *sdata = settings_lookup(section, name);
   if (sdata == NULL) {
-    piksi_log(LOG_WARNING,
-              "Bad settings read request: setting not found (%s.%s)",
-              section,
-              name);
+    piksi_log(LOG_WARNING, "Bad settings read request: setting not found (%s.%s)", section, name);
     return;
   }
 
@@ -241,7 +238,14 @@ static void settings_read_by_idx_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
   /* build and send reply */
   buf[buflen++] = msg[0];
   buf[buflen++] = msg[1];
-  settings_send(tx_ctx, s, true, false, SBP_MSG_SETTINGS_READ_BY_INDEX_RESP, buf, buflen, sizeof(buf));
+  settings_send(tx_ctx,
+                s,
+                true,
+                false,
+                SBP_MSG_SETTINGS_READ_BY_INDEX_RESP,
+                buf,
+                buflen,
+                sizeof(buf));
 }
 
 static void settings_save_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
@@ -276,7 +280,10 @@ static void settings_save_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
   fclose(f);
 }
 
-static void settings_write_reject(sbp_tx_ctx_t *tx_ctx, const char *section, const char *name, const char *value)
+static void settings_write_reject(sbp_tx_ctx_t *tx_ctx,
+                                  const char *section,
+                                  const char *name,
+                                  const char *value)
 {
   if (section != NULL && name != NULL) {
     piksi_log(LOG_ERR, "Setting %s.%s write rejected", section, name);
@@ -289,12 +296,7 @@ static void settings_write_reject(sbp_tx_ctx_t *tx_ctx, const char *section, con
   char buf[BUFSIZE] = {0};
   buf[buflen++] = SETTINGS_WR_SETTING_REJECTED;
 
-  int res = settings_format(section,
-                            name,
-                            value,
-                            NULL,
-                            buf + buflen,
-                            BUFSIZE - buflen);
+  int res = settings_format(section, name, value, NULL, buf + buflen, BUFSIZE - buflen);
 
   if (res <= 0) {
     piksi_log(LOG_WARNING, "Write reject response formatting failed");
@@ -344,11 +346,7 @@ void settings_setup(sbp_rx_ctx_t *rx_ctx, sbp_tx_ctx_t *tx_ctx)
                            settings_read_by_idx_cb,
                            tx_ctx,
                            NULL);
-  sbp_rx_callback_register(rx_ctx,
-                           SBP_MSG_SETTINGS_REGISTER,
-                           settings_register_cb,
-                           tx_ctx,
-                           NULL);
+  sbp_rx_callback_register(rx_ctx, SBP_MSG_SETTINGS_REGISTER, settings_register_cb, tx_ctx, NULL);
 }
 
 void settings_reset_defaults(void)
