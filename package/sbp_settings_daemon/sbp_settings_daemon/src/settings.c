@@ -186,48 +186,25 @@ static void settings_read_callback(u16 sender_id, u8 len, u8 msg[], void *contex
     piksi_log(LOG_WARNING, "Invalid sender");
     return;
   }
-
-  static struct setting *s = NULL;
-  const char *section = NULL, *setting = NULL;
-  char buf[256];
-  u8 buflen;
-
-  if (len == 0) {
-    piksi_log(LOG_WARNING, "Error in settings read message: length is zero");
+  
+  /* Expect to find at least section and name */
+  const char *section = NULL, *name = NULL;
+  if (settings_parse(msg, len, &section, &name, NULL, NULL) < SETTINGS_TOKENS_NAME) {
+    piksi_log(LOG_WARNING, "Error in write reply message");
     return;
   }
 
-  if (msg[len - 1] != '\0') {
-    piksi_log(LOG_WARNING, "Error in settings read message: null string");
-    return;
-  }
-
-  /* Extract parameters from message:
-   * 2 null terminated strings: section, and setting
-   */
-  section = (const char *)msg;
-  for (int i = 0, tok = 0; i < len; i++) {
-    if (msg[i] == '\0') {
-      tok++;
-      switch (tok) {
-      case 1: setting = (const char *)&msg[i + 1]; break;
-      case 2:
-        if (i == len - 1) break;
-      default: piksi_log(LOG_WARNING, "Error in settings read message: parse error"); return;
-      }
-    }
-  }
-
-  s = settings_lookup(section, setting);
-  if (s == NULL) {
+  struct setting *sdata = settings_lookup(section, name);
+  if (sdata == NULL) {
     piksi_log(LOG_WARNING,
               "Bad settings read request: setting not found (%s.%s)",
               section,
-              setting);
+              name);
     return;
   }
 
-  settings_send(tx_ctx, s, false, false, SBP_MSG_SETTINGS_READ_RESP, buf, 0, sizeof(buf));
+  char buf[256];
+  settings_send(tx_ctx, sdata, false, false, SBP_MSG_SETTINGS_READ_RESP, buf, 0, sizeof(buf));
 }
 
 static void settings_read_by_index_callback(u16 sender_id, u8 len, u8 msg[], void *context)
