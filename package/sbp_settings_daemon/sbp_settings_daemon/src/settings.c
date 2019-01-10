@@ -89,6 +89,12 @@ static void settings_send(sbp_tx_ctx_t *tx_ctx,
     sdata = &(struct setting){0};
   }
 
+  char l_buf[BUFSIZE] = {0};
+  if (buf == NULL) {
+    buf = l_buf;
+    blen = sizeof(l_buf);
+  }
+
   int res = settings_format(sdata->section,
                             sdata->name,
                             sdata->value,
@@ -138,8 +144,7 @@ static void setting_register_callback(u16 sender_id, u8 len, u8 msg[], void *con
   }
 
   /* Reply with write message with our value */
-  char buf[256];
-  settings_send(tx_ctx, sdata, false, true, SBP_MSG_SETTINGS_WRITE, buf, 0, sizeof(buf));
+  settings_send(tx_ctx, sdata, false, true, SBP_MSG_SETTINGS_WRITE, NULL, 0, 0);
 }
 
 static void settings_write_reply_callback(u16 sender_id, u8 len, u8 msg_[], void *context)
@@ -203,8 +208,7 @@ static void settings_read_callback(u16 sender_id, u8 len, u8 msg[], void *contex
     return;
   }
 
-  char buf[256];
-  settings_send(tx_ctx, sdata, false, false, SBP_MSG_SETTINGS_READ_RESP, buf, 0, sizeof(buf));
+  settings_send(tx_ctx, sdata, false, false, SBP_MSG_SETTINGS_READ_RESP, NULL, 0, 0);
 }
 
 static void settings_read_by_index_callback(u16 sender_id, u8 len, u8 msg[], void *context)
