@@ -76,25 +76,36 @@ static struct setting *settings_lookup(const char *section, const char *setting)
   return NULL;
 }
 
-/* Format setting into SBP message payload */
-static int settings_format_setting(struct setting *s, char *buf, int len, bool type)
+static void settings_send(sbp_tx_ctx_t *tx_ctx,
+                          struct setting *sdata,
+                          bool type,
+                          bool sbp_sender_id,
+                          u16 msg_type,
+                          char *buf,
+                          u8 offset,
+                          size_t blen)
 {
-  int buflen;
-
-  /* build and send reply */
-  strncpy(buf, s->section, len);
-  buflen = strlen(s->section) + 1;
-  strncpy(buf + buflen, s->name, len - buflen);
-  buflen += strlen(s->name) + 1;
-  strncpy(buf + buflen, s->value, len - buflen);
-  buflen += strlen(s->value) + 1;
-  if (type && s->type[0]) {
-    strncpy(buf + buflen, s->type, len - buflen);
-    buflen += strlen(s->type) + 1;
-    buf[buflen++] = '\0';
+  if (sdata == NULL) {
+    sdata = &(struct setting){0};
   }
 
-  return buflen;
+  int res = settings_format(sdata->section,
+                            sdata->name,
+                            sdata->value,
+                            type ? sdata->type : NULL,
+                            buf + offset,
+                            blen - offset);
+
+  if (res <= 0) {
+    piksi_log(LOG_ERR, "Setting %s.%s failed to format", sdata->section, sdata->name);
+    return;
+  }
+
+  if (sbp_sender_id) {
+    sbp_tx_send_from(tx_ctx, msg_type, res + offset, (u8 *)buf, SBP_SENDER_ID);
+  } else {
+    sbp_tx_send(tx_ctx, msg_type, res + offset, (u8 *)buf);
+  }
 }
 
 static void setting_register_callback(u16 sender_id, u8 len, u8 msg[], void *context)
@@ -128,8 +139,7 @@ static void setting_register_callback(u16 sender_id, u8 len, u8 msg[], void *con
 
   /* Reply with write message with our value */
   char buf[256];
-  size_t rlen = settings_format_setting(sdata, buf, sizeof(buf), false);
-  sbp_tx_send_from(tx_ctx, SBP_MSG_SETTINGS_WRITE, rlen, (u8 *)buf, SBP_SENDER_ID);
+  settings_send(tx_ctx, sdata, false, true, SBP_MSG_SETTINGS_WRITE, buf, 0, sizeof(buf));
 }
 
 static void settings_write_reply_callback(u16 sender_id, u8 len, u8 msg_[], void *context)
@@ -217,9 +227,7 @@ static void settings_read_callback(u16 sender_id, u8 len, u8 msg[], void *contex
     return;
   }
 
-  buflen = settings_format_setting(s, buf, sizeof(buf), true);
-  sbp_tx_send(tx_ctx, SBP_MSG_SETTINGS_READ_RESP, buflen, (void *)buf);
-  return;
+  settings_send(tx_ctx, s, false, false, SBP_MSG_SETTINGS_READ_RESP, buf, 0, sizeof(buf));
 }
 
 static void settings_read_by_index_callback(u16 sender_id, u8 len, u8 msg[], void *context)
@@ -252,8 +260,7 @@ static void settings_read_by_index_callback(u16 sender_id, u8 len, u8 msg[], voi
   /* build and send reply */
   buf[buflen++] = msg[0];
   buf[buflen++] = msg[1];
-  buflen += settings_format_setting(s, buf + buflen, sizeof(buf) - buflen, true);
-  sbp_tx_send(tx_ctx, SBP_MSG_SETTINGS_READ_BY_INDEX_RESP, buflen, (void *)buf);
+  settings_send(tx_ctx, s, true, false, SBP_MSG_SETTINGS_READ_BY_INDEX_RESP, buf, buflen, sizeof(buf));
 }
 
 static void settings_save_callback(u16 sender_id, u8 len, u8 msg[], void *context)
@@ -288,6 +295,35 @@ static void settings_save_callback(u16 sender_id, u8 len, u8 msg[], void *contex
   fclose(f);
 }
 
+static void settings_write_reject(sbp_tx_ctx_t *tx_ctx, const char *section, const char *name, const char *value)
+{
+  if (section != NULL && name != NULL) {
+    piksi_log(LOG_ERR, "Setting %s.%s write rejected", section, name);
+  } else {
+    piksi_log(LOG_ERR, "Setting write rejected");
+  }
+
+  /* Reply with write response rejecting this setting */
+  int buflen = 0;
+  char buf[BUFSIZE] = {0};
+  buf[buflen++] = SETTINGS_WR_SETTING_REJECTED;
+
+  int res = settings_format(section,
+                            name,
+                            value,
+                            NULL,
+                            buf + buflen,
+                            BUFSIZE - buflen);
+
+  if (res <= 0) {
+    piksi_log(LOG_WARNING, "Write reject response formatting failed");
+  } else {
+    buflen += res;
+  }
+
+  sbp_tx_send_from(tx_ctx, SBP_MSG_SETTINGS_WRITE_RESP, buflen, buf, SBP_SENDER_ID);
+}
+
 static void settings_write_callback(u16 sender_id, u8 len, u8 msg[], void *context)
 {
   (void)sender_id;
@@ -296,36 +332,20 @@ static void settings_write_callback(u16 sender_id, u8 len, u8 msg[], void *conte
 
   const char *section = NULL, *name = NULL, *value = NULL, *type = NULL;
   /* Expect to find at least section, name and value */
-  if ((settings_parse(msg, len, &section, &name, &value, &type) >= SETTINGS_TOKENS_VALUE)
-      && settings_lookup(section, name) != NULL) {
-    /* This setting looks good; we'll leave it to the owner to complain if
-     * there's a problem with the value. */
+  if (settings_parse(msg, len, &section, &name, &value, &type) < SETTINGS_TOKENS_VALUE) {
+    settings_write_reject(tx_ctx, section, name, value);
     return;
   }
 
-  piksi_log(LOG_ERR, "Setting %s.%s rejected", section, name);
-
-  /* Reply with write response rejecting this setting */
-  int buflen = 0;
-  u8 buf[BUFSIZE] = {0};
-  buf[buflen++] = SETTINGS_WR_SETTING_REJECTED;
-
-  if (section != NULL) {
-    strncpy(buf, section, BUFSIZE - buflen);
-    buflen += strlen(section) + 1;
+  struct setting *sdata = settings_lookup(section, name);
+  if (sdata == NULL) {
+    settings_write_reject(tx_ctx, section, name, value);
+    return;
   }
 
-  if (name != NULL) {
-    strncpy(buf + buflen, name, BUFSIZE - buflen);
-    buflen += strlen(name) + 1;
-  }
-
-  if (value != NULL) {
-    strncpy(buf + buflen, value, BUFSIZE - buflen);
-    buflen += strlen(value) + 1;
-  }
-
-  sbp_tx_send_from(tx_ctx, SBP_MSG_SETTINGS_WRITE_RESP, buflen, buf, SBP_SENDER_ID);
+  /* This setting looks good; we'll leave it to the owner to complain if
+   * there's a problem with the value. */
+  return;
 }
 
 void settings_setup(sbp_rx_ctx_t *rx_ctx, sbp_tx_ctx_t *tx_ctx)
