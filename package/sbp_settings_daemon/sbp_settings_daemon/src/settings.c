@@ -17,6 +17,7 @@
 
 #include <libpiksi/logging.h>
 #include <libpiksi/min_ini.h>
+#include <libpiksi/util.h>
 
 #include <libsbp/settings.h>
 
@@ -286,35 +287,20 @@ static void settings_save_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
   fclose(f);
 }
 
-static void settings_write_reject(sbp_tx_ctx_t *tx_ctx,
-                                  const char *section,
-                                  const char *name,
-                                  const char *value)
+static void settings_write_failed(sbp_tx_ctx_t *tx_ctx,
+                                  settings_write_res_t res,
+                                  char *msg,
+                                  int msg_len)
 {
-  if (section != NULL && name != NULL) {
-    piksi_log(LOG_ERR, "Error in settings write request: %s.%s write rejected", section, name);
-  } else {
-    piksi_log(LOG_ERR, "Error in settings write request: write rejected");
-  }
-
   /* Reply with write response rejecting this setting */
-  int buflen = 0;
+  int blen = 0;
   char buf[BUFSIZE] = {0};
-  buf[buflen++] = SETTINGS_WR_SETTING_REJECTED;
+  buf[blen++] = res;
 
-  int res = settings_format(section, name, value, NULL, buf + buflen, BUFSIZE - buflen);
+  int to_copy = SWFT_MIN(sizeof(buf) - blen, msg_len);
+  memcpy(buf + blen, msg, to_copy);
 
-  /*
-   * Allow zero length setting data.
-   * This is possible in case of sending only the status field.
-   */
-  if (res < 0) {
-    piksi_log(LOG_WARNING, "Write reject response formatting failed");
-  } else {
-    buflen += res;
-  }
-
-  sbp_tx_send_from(tx_ctx, SBP_MSG_SETTINGS_WRITE_RESP, buflen, buf, SBP_SENDER_ID);
+  sbp_tx_send_from(tx_ctx, SBP_MSG_SETTINGS_WRITE_RESP, blen + to_copy, buf, SBP_SENDER_ID);
 }
 
 static void settings_write_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
@@ -326,13 +312,15 @@ static void settings_write_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
   const char *section = NULL, *name = NULL, *value = NULL, *type = NULL;
   /* Expect to find at least section, name and value */
   if (settings_parse(msg, len, &section, &name, &value, &type) < SETTINGS_TOKENS_VALUE) {
-    settings_write_reject(tx_ctx, section, name, value);
+    piksi_log(LOG_ERR, "Error in settings write request: parse error");
+    settings_write_failed(tx_ctx, SETTINGS_WR_PARSE_FAILED, msg, len);
     return;
   }
 
   struct setting *sdata = settings_lookup(section, name);
   if (sdata == NULL) {
-    settings_write_reject(tx_ctx, section, name, value);
+    piksi_log(LOG_ERR, "Error in settings write request: %s.%s not registered", section, name);
+    settings_write_failed(tx_ctx, SETTINGS_WR_SETTING_REJECTED, msg, len);
     return;
   }
 
