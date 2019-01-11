@@ -236,14 +236,18 @@ static void settings_read_by_index_cb(u16 sender_id, u8 len, u8 msg[], void *ctx
     return;
   }
 
-  if (len != 2) {
+  if (len != sizeof(msg_settings_read_by_index_req_t)) {
     piksi_log(LOG_ERR, "Error in settings read by index request: malformed message");
     return;
   }
 
-  u16 index = (msg[1] << 8) | msg[0];
+  msg_settings_read_by_index_req_t *req = (msg_settings_read_by_index_req_t *)msg;
 
-  struct setting *sdata = setting_find_by_index(index);
+  /* 16 bit index expected */
+  assert(sizeof(req->index) == sizeof(u16));
+
+  /* SBP is little-endian */
+  struct setting *sdata = setting_find_by_index(le16toh(req->index));
   if (sdata == NULL) {
     sbp_tx_send(tx_ctx, SBP_MSG_SETTINGS_READ_BY_INDEX_DONE, 0, NULL);
     return;
