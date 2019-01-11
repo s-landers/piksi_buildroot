@@ -255,16 +255,14 @@ static void settings_read_by_index_cb(u16 sender_id, u8 len, u8 msg[], void *ctx
 
   /* build and send reply */
   char buf[256];
-  u8 buflen = 0;
-  buf[buflen++] = msg[0];
-  buf[buflen++] = msg[1];
+  memcpy(buf, msg, len);
   settings_reply(tx_ctx,
                  sdata,
                  true,
                  false,
                  SBP_MSG_SETTINGS_READ_BY_INDEX_RESP,
                  buf,
-                 buflen,
+                 len,
                  sizeof(buf));
 }
 
