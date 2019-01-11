@@ -103,7 +103,11 @@ static void settings_send(sbp_tx_ctx_t *tx_ctx,
                             buf + offset,
                             blen - offset);
 
-  if (res <= 0) {
+  /* 
+   * Allow zero length setting data.
+   * This is possible in case of settings_write_reject(), sending only the status field.
+   */
+  if (res < 0) {
     piksi_log(LOG_ERR, "Setting %s.%s failed to format", sdata->section, sdata->name);
     return;
   }
