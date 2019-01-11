@@ -214,6 +214,19 @@ static void settings_read_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
   settings_reply(tx_ctx, sdata, false, false, SBP_MSG_SETTINGS_READ_RESP, NULL, 0, 0);
 }
 
+static struct setting *setting_find_by_index(u16 index)
+{
+  struct setting *sdata = settings_head;
+  u16 i = 0;
+
+  while ((i < index) && (sdata != NULL)) {
+    sdata = sdata->next;
+    i++;
+  }
+
+  return sdata;
+}
+
 static void settings_read_by_index_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
 {
   sbp_tx_ctx_t *tx_ctx = (sbp_tx_ctx_t *)ctx;
@@ -223,10 +236,6 @@ static void settings_read_by_index_cb(u16 sender_id, u8 len, u8 msg[], void *ctx
     return;
   }
 
-  struct setting *s = settings_head;
-  char buf[256];
-  u8 buflen = 0;
-
   if (len != 2) {
     piksi_log(LOG_ERR, "Error in settings read by index request: malformed message");
     return;
@@ -234,19 +243,19 @@ static void settings_read_by_index_cb(u16 sender_id, u8 len, u8 msg[], void *ctx
 
   u16 index = (msg[1] << 8) | msg[0];
 
-  for (int i = 0; (i < index) && s; i++, s = s->next)
-    ;
-
-  if (s == NULL) {
+  struct setting *sdata = setting_find_by_index(index);
+  if (sdata == NULL) {
     sbp_tx_send(tx_ctx, SBP_MSG_SETTINGS_READ_BY_INDEX_DONE, 0, NULL);
     return;
   }
 
   /* build and send reply */
+  char buf[256];
+  u8 buflen = 0;
   buf[buflen++] = msg[0];
   buf[buflen++] = msg[1];
   settings_reply(tx_ctx,
-                 s,
+                 sdata,
                  true,
                  false,
                  SBP_MSG_SETTINGS_READ_BY_INDEX_RESP,
