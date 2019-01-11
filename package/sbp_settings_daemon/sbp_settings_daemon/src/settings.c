@@ -85,10 +85,8 @@ static void settings_send(sbp_tx_ctx_t *tx_ctx,
                           u8 offset,
                           size_t blen)
 {
-  struct setting l_sdata = (struct setting){0};
-  if (sdata == NULL) {
-    sdata = &l_sdata;
-  }
+  assert(tx_ctx != NULL);
+  assert(sdata != NULL);
 
   char l_buf[BUFSIZE] = {0};
   if (buf == NULL) {
@@ -103,11 +101,7 @@ static void settings_send(sbp_tx_ctx_t *tx_ctx,
                             buf + offset,
                             blen - offset);
 
-  /*
-   * Allow zero length setting data.
-   * This is possible in case of settings_write_reject(), sending only the status field.
-   */
-  if (res < 0) {
+  if (res <= 0) {
     piksi_log(LOG_ERR, "Setting %s.%s failed to format", sdata->section, sdata->name);
     return;
   }
@@ -310,7 +304,11 @@ static void settings_write_reject(sbp_tx_ctx_t *tx_ctx,
 
   int res = settings_format(section, name, value, NULL, buf + buflen, BUFSIZE - buflen);
 
-  if (res <= 0) {
+  /*
+   * Allow zero length setting data.
+   * This is possible in case of sending only the status field.
+   */
+  if (res < 0) {
     piksi_log(LOG_WARNING, "Write reject response formatting failed");
   } else {
     buflen += res;
