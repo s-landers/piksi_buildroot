@@ -85,8 +85,9 @@ static void settings_send(sbp_tx_ctx_t *tx_ctx,
                           u8 offset,
                           size_t blen)
 {
+  struct setting l_sdata = (struct setting){0};
   if (sdata == NULL) {
-    sdata = &(struct setting){0};
+    sdata = &l_sdata;
   }
 
   char l_buf[BUFSIZE] = {0};
