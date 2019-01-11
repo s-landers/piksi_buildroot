@@ -103,7 +103,7 @@ static void settings_send(sbp_tx_ctx_t *tx_ctx,
                             buf + offset,
                             blen - offset);
 
-  /* 
+  /*
    * Allow zero length setting data.
    * This is possible in case of settings_write_reject(), sending only the status field.
    */
@@ -128,7 +128,7 @@ static void settings_register_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
   const char *section = NULL, *name = NULL, *value = NULL, *type = NULL;
   /* Expect to find at least section, name and value */
   if (settings_parse(msg, len, &section, &name, &value, &type) < SETTINGS_TOKENS_VALUE) {
-    piksi_log(LOG_WARNING, "Error in register message");
+    piksi_log(LOG_ERR, "Error in settings register request: parse error");
   }
 
   struct setting *sdata = settings_lookup(section, name);
@@ -145,7 +145,10 @@ static void settings_register_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
 
     setting_register(sdata);
   } else {
-    piksi_log(LOG_WARNING, "Setting %s.%s already registered", sdata->section, sdata->name);
+    piksi_log(LOG_WARNING,
+              "Settings register request: %s.%s already registered",
+              sdata->section,
+              sdata->name);
   }
 
   /* Reply with write message with our value */
@@ -166,13 +169,16 @@ static void settings_write_reply_cb(u16 sender_id, u8 len, u8 msg_[], void *ctx)
   /* Expect to find at least section, name and value */
   if (settings_parse(msg->setting, len - sizeof(msg->status), &section, &name, &value, NULL)
       < SETTINGS_TOKENS_VALUE) {
-    piksi_log(LOG_WARNING, "Error in write reply message");
+    piksi_log(LOG_ERR, "Error in settings write reply message: parse error");
     return;
   }
 
   struct setting *sdata = settings_lookup(section, name);
   if (sdata == NULL) {
-    piksi_log(LOG_WARNING, "Write reply for non-existent setting");
+    piksi_log(LOG_ERR,
+              "Error in settings write reply message: %s.%s not registered",
+              section,
+              name);
     return;
   }
 
@@ -193,20 +199,20 @@ static void settings_read_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
   sbp_tx_ctx_t *tx_ctx = (sbp_tx_ctx_t *)ctx;
 
   if (sender_id != SBP_SENDER_ID) {
-    piksi_log(LOG_WARNING, "Invalid sender");
+    piksi_log(LOG_ERR, "Error in settings read request: invalid sender");
     return;
   }
 
   /* Expect to find at least section and name */
   const char *section = NULL, *name = NULL;
   if (settings_parse(msg, len, &section, &name, NULL, NULL) < SETTINGS_TOKENS_NAME) {
-    piksi_log(LOG_WARNING, "Error in write reply message");
+    piksi_log(LOG_ERR, "Error in settings read request: parse error");
     return;
   }
 
   struct setting *sdata = settings_lookup(section, name);
   if (sdata == NULL) {
-    piksi_log(LOG_WARNING, "Bad settings read request: setting not found (%s.%s)", section, name);
+    piksi_log(LOG_ERR, "Error in settings read request: setting not found (%s.%s)", section, name);
     return;
   }
 
@@ -218,7 +224,7 @@ static void settings_read_by_index_cb(u16 sender_id, u8 len, u8 msg[], void *ctx
   sbp_tx_ctx_t *tx_ctx = (sbp_tx_ctx_t *)ctx;
 
   if (sender_id != SBP_SENDER_ID) {
-    piksi_log(LOG_WARNING, "Invalid sender");
+    piksi_log(LOG_ERR, "Error in settings read by index request: invalid sender");
     return;
   }
 
@@ -227,9 +233,10 @@ static void settings_read_by_index_cb(u16 sender_id, u8 len, u8 msg[], void *ctx
   u8 buflen = 0;
 
   if (len != 2) {
-    piksi_log(LOG_WARNING, "Invalid length for settings read by index!");
+    piksi_log(LOG_ERR, "Error in settings read by index request: malformed message");
     return;
   }
+
   u16 index = (msg[1] << 8) | msg[0];
 
   for (int i = 0; (i < index) && s; i++, s = s->next)
@@ -264,7 +271,7 @@ static void settings_save_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
   const char *sec = NULL;
 
   if (f == NULL) {
-    piksi_log(LOG_ERR, "Error opening config file!");
+    piksi_log(LOG_ERR, "Error in settings save request: file open failed");
     return;
   }
 
@@ -291,9 +298,9 @@ static void settings_write_reject(sbp_tx_ctx_t *tx_ctx,
                                   const char *value)
 {
   if (section != NULL && name != NULL) {
-    piksi_log(LOG_ERR, "Setting %s.%s write rejected", section, name);
+    piksi_log(LOG_ERR, "Error in settings write request: %s.%s write rejected", section, name);
   } else {
-    piksi_log(LOG_ERR, "Setting write rejected");
+    piksi_log(LOG_ERR, "Error in settings write request: write rejected");
   }
 
   /* Reply with write response rejecting this setting */
