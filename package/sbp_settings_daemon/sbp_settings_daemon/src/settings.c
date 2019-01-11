@@ -208,7 +208,7 @@ static void settings_read_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
   settings_send(tx_ctx, sdata, false, false, SBP_MSG_SETTINGS_READ_RESP, NULL, 0, 0);
 }
 
-static void settings_read_by_idx_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
+static void settings_read_by_index_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
 {
   sbp_tx_ctx_t *tx_ctx = (sbp_tx_ctx_t *)ctx;
 
@@ -343,7 +343,7 @@ void settings_setup(sbp_rx_ctx_t *rx_ctx, sbp_tx_ctx_t *tx_ctx)
   sbp_rx_callback_register(rx_ctx, SBP_MSG_SETTINGS_READ_REQ, settings_read_cb, tx_ctx, NULL);
   sbp_rx_callback_register(rx_ctx,
                            SBP_MSG_SETTINGS_READ_BY_INDEX_REQ,
-                           settings_read_by_idx_cb,
+                           settings_read_by_index_cb,
                            tx_ctx,
                            NULL);
   sbp_rx_callback_register(rx_ctx, SBP_MSG_SETTINGS_REGISTER, settings_register_cb, tx_ctx, NULL);
