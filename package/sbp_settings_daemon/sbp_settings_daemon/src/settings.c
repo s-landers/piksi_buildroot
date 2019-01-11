@@ -77,14 +77,14 @@ static struct setting *settings_lookup(const char *section, const char *setting)
   return NULL;
 }
 
-static void settings_send(sbp_tx_ctx_t *tx_ctx,
-                          struct setting *sdata,
-                          bool type,
-                          bool sbp_sender_id,
-                          u16 msg_type,
-                          char *buf,
-                          u8 offset,
-                          size_t blen)
+static void settings_reply(sbp_tx_ctx_t *tx_ctx,
+                           struct setting *sdata,
+                           bool type,
+                           bool sbp_sender_id,
+                           u16 msg_type,
+                           char *buf,
+                           u8 offset,
+                           size_t blen)
 {
   assert(tx_ctx != NULL);
   assert(sdata != NULL);
@@ -103,7 +103,7 @@ static void settings_send(sbp_tx_ctx_t *tx_ctx,
                             blen - offset);
 
   if (res <= 0) {
-    piksi_log(LOG_ERR, "Setting %s.%s failed to format", sdata->section, sdata->name);
+    piksi_log(LOG_ERR, "Setting %s.%s reply format failed", sdata->section, sdata->name);
     return;
   }
 
@@ -147,7 +147,7 @@ static void settings_register_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
   }
 
   /* Reply with write message with our value */
-  settings_send(tx_ctx, sdata, false, true, SBP_MSG_SETTINGS_WRITE, NULL, 0, 0);
+  settings_reply(tx_ctx, sdata, false, true, SBP_MSG_SETTINGS_WRITE, NULL, 0, 0);
 }
 
 static void settings_write_reply_cb(u16 sender_id, u8 len, u8 msg_[], void *ctx)
@@ -211,7 +211,7 @@ static void settings_read_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
     return;
   }
 
-  settings_send(tx_ctx, sdata, false, false, SBP_MSG_SETTINGS_READ_RESP, NULL, 0, 0);
+  settings_reply(tx_ctx, sdata, false, false, SBP_MSG_SETTINGS_READ_RESP, NULL, 0, 0);
 }
 
 static void settings_read_by_index_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
@@ -245,14 +245,14 @@ static void settings_read_by_index_cb(u16 sender_id, u8 len, u8 msg[], void *ctx
   /* build and send reply */
   buf[buflen++] = msg[0];
   buf[buflen++] = msg[1];
-  settings_send(tx_ctx,
-                s,
-                true,
-                false,
-                SBP_MSG_SETTINGS_READ_BY_INDEX_RESP,
-                buf,
-                buflen,
-                sizeof(buf));
+  settings_reply(tx_ctx,
+                 s,
+                 true,
+                 false,
+                 SBP_MSG_SETTINGS_READ_BY_INDEX_RESP,
+                 buf,
+                 buflen,
+                 sizeof(buf));
 }
 
 static void settings_save_cb(u16 sender_id, u8 len, u8 msg[], void *ctx)
